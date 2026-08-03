@@ -1,0 +1,15 @@
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# clasp — not used per team preference (edits happen in the web editor).
+# .clasp.json holds the script ID and would be committed if we ever adopted clasp,
+# but keeping it ignored for now so nothing accidentally couples this repo to clasp.
+.clasp.json
+.clasprc.json
+
+# Claude / scratch
+.claude/
+scratchpad/
