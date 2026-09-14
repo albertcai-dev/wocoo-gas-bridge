@@ -47,8 +47,19 @@
 
 var CC_TEMPLATE_ID_DEFAULT = '1K5tpUdWdsxGYcs1Lgdbg5G4S51ilQgcv_yX6G4P6kRM';
 
-/** Rows per activity page. 18 is what the original hand-made template carried. */
-var CC_ROWS_PER_PAGE = 18;
+/**
+ * Rows per activity page.
+ *
+ * 15, not the 18 the original hand-made template carried. 18 overflowed: the first
+ * activity page also carries the "Activity" heading and its blank lines, so the 18th row
+ * spilled onto the next page and dragged the layout with it. 15 is what Albert's
+ * hand-corrected WOCOO-28171 statement fits on its first activity page.
+ *
+ * Continuation pages have no "Activity" heading and so could hold a row or two more, but
+ * they use the same 15 deliberately — one constant that never overflows beats two tuned
+ * ones, and a slightly short page reads fine.
+ */
+var CC_ROWS_PER_PAGE = 15;
 
 /** Sentinels and markers shared with the extension side. */
 var CC_ROW_PROTOTYPE = '%ROW%';
@@ -132,8 +143,9 @@ function _ccStatementFolder_(templateFile) {
  * Adds one batch of activity rows.
  *
  * `startIndex` is each row's position in the WHOLE statement, not in this batch, so the
- * extension can batch for URL length (15 rows) while this decides pagination (18 rows
- * per page) independently. Rows must arrive in order.
+ * extension can batch for URL length while this decides pagination (CC_ROWS_PER_PAGE)
+ * independently. The two happen to both be 15 right now; nothing depends on that.
+ * Rows must arrive in order.
  *
  * Returns { rowsAppended }.
  */
@@ -234,7 +246,7 @@ function _ccAppendActivityPage_(body, prototypeTable, lastTable) {
   }
 
   var insertAt = body.getChildIndex(lastTable) + 1;
-  body.insertPageBreak(insertAt++);
+  var isFirstParagraph = true;
 
   for (var j = blockStart; j < protoTableIndex; j++) {
     var el = body.getChild(j);
@@ -242,7 +254,17 @@ function _ccAppendActivityPage_(body, prototypeTable, lastTable) {
     var text = el.asParagraph().getText().replace(/\s+/g, ' ').trim();
     // The real statement prints "Activity" only above the first activity page.
     if (text === CC_ACTIVITY_HEADING) continue;
-    body.insertParagraph(insertAt++, el.asParagraph().copy());
+
+    var inserted = body.insertParagraph(insertAt++, el.asParagraph().copy());
+
+    // The page break goes INSIDE this first paragraph, not in one of its own.
+    // body.insertPageBreak(index) would create a separate paragraph to hold it, which
+    // renders as an extra blank line at the top of every continuation page — the
+    // spacing bug Albert had to fix by hand on the first real run.
+    if (isFirstParagraph) {
+      inserted.insertPageBreak(0);
+      isFirstParagraph = false;
+    }
   }
 
   var newTable = body.insertTable(insertAt, prototypeTable.copy());
@@ -428,7 +450,7 @@ function testCreateCcStatement() {
   });
   Logger.log('Doc: ' + created.docUrl);
 
-  // 40 rows spans 3 activity pages at 18/page, so page-block copying runs twice.
+  // 40 rows spans 3 activity pages at 15/page, so page-block copying runs twice.
   var batch = {};
   for (var i = 0; i < 40; i++) {
     batch['r' + i] = i === 5
