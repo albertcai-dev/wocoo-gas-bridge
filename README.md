@@ -35,6 +35,10 @@ The `doGet` router dispatches on the `action` query parameter. Actions the exten
 | `checkForReplies` | Gmail-search each tracking row for inbound replies | `repliesChecked` | 60s timeout |
 | `listTrackedTickets` | Return the tracking sheet verbatim — no Gmail work | `trackedTicketsListed` | See `ReplyTracking.gs` |
 | `acknowledgeReply` | Flip a tracking row's `acknowledged` to TRUE | `replyAcknowledged` | |
+| `createRefundLetter` | Copy + fill the refund-letter template, export PDF | `refundLetterCreated` | 90s timeout — Doc copy + PDF export. See `RefundLetter.gs` |
+| `createCcStatement` | Copy + fill the statement template (no activity rows) | `ccStatementCreated` | 90s timeout. See `CustomCcStatement.gs` |
+| `appendCcStatementRows` | Add a batch of activity rows to a statement Doc | `ccStatementRowsAppended` | 120s timeout. `startIndex` is the row's position in the whole statement, not the batch |
+| `finalizeCcStatement` | Drop `%ROW%` prototypes, export the statement PDF | `ccStatementFinalized` | 120s timeout. Must run after the last row batch |
 
 **Reply pattern:** every action's HtmlOutput calls `window.top.postMessage({ action: '<reply>', ... }, '*')`. The extension's `gasBridge` content script (running on `script.google.com`) forwards this via `chrome.runtime.sendMessage` to the sidepanel. Using `window.top` (not `window.parent`) is critical — see the `reference_apps_script_gas_iframe_postmessage` memory for why.
 
@@ -63,6 +67,30 @@ if (e && e.parameter && e.parameter.action === 'backfillI2cBatch') {
 Verify with `whatDoesListTrackedTicketsReturn()` from the editor before redeploying — it logs whether the router matched or fell through to the dashboard HTML.
 
 The sheet is resolved via the `replies_sheet_id` script property (see `_repliesSheet_()`), not a hardcoded ID.
+
+## Custom CC statement
+
+`CustomCcStatement.gs` issues a corrected credit card statement when the one Wealthsimple
+generated carried stale client data and the error was ours. Driver ticket: WOCOO-28171.
+
+Three actions instead of one because the bridge is GET-only and a 60-row statement's
+activity does not fit in a query string. The extension batches 15 rows per call for URL
+length; this script paginates at 18 rows per page, independently.
+
+Template: `1K5tpUdWdsxGYcs1Lgdbg5G4S51ilQgcv_yX6G4P6kRM` — a tokenized copy of the
+hand-made "Brian Sinclair" statement, resolved via the `cc_statement_template_id` script
+property. **The template has a structural contract** (one activity page block starting
+with a "Credit Card Statement" paragraph and ending in a `TRANS. DATE` table that holds
+its header row plus one all-`%ROW%` prototype row) — the header comment in the `.gs`
+spells it out. Editing the template's activity section without reading that contract will
+break row insertion.
+
+Copying the page block, rather than building tables from scratch, is what preserves
+column widths, header-row bold and cell fonts. Inserting each row *before* the trailing
+`%ROW%` row is what makes new rows inherit body-row formatting.
+
+Run `testCreateCcStatement()` from the editor before redeploying. It builds a 40-row
+statement, which spans three activity pages, so the page-block copy path actually runs.
 
 ## Editing workflow
 
