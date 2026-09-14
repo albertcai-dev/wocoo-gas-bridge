@@ -28,6 +28,7 @@ The `doGet` router dispatches on the `action` query parameter. Actions the exten
 | `getMobileChequeValidationStatus` | Read cached MCV record for today | `mobileChequeValidationStatus` | Returns `{ dateKey, record }` |
 | `markMobileChequeValidationSent` | Mark day's MCV as posted | `mobileChequeValidationMarkSent` | For "already sent" UI state |
 | `parseTranscript` | Re-diarize Zendesk transcript via MagicAI | `transcriptParsed` | Unused in extension (Tools menu deferred) |
+| `createFraud` | Create a FRAUD ticket + link it to the WOCOO ticket | `fraudCreated` | v3 site only, for overpayments over $10,000. FRAUD is MCP-limited, so create/link cannot go through MCP |
 | `logKohoSend` | Append a tracking row after a Koho email | `kohoSendLogged` | Reply-tracking sheet |
 | `logI2cSubmit` | Append a tracking row after an i2c form submit | `i2cSubmitLogged` | Reply-tracking sheet; `trackKey` = client email |
 | `backfillI2cBatch` | Bulk-add historical i2c tracking rows | `i2cBackfillLogged` | Dedupes on (wocooId + email); `entries` is a JSON array in the query string |

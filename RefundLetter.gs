@@ -8,6 +8,11 @@
  * and returns both links. Set `includePdfBase64=1` to also get the PDF bytes back so the
  * extension can attach it to the Jira ticket without a second Drive round-trip.
  *
+ * TOKENS ARE DERIVED FROM PARAMETER NAMES — `clientName` fills {{CLIENT_NAME}},
+ * `addressCityProvince` fills {{ADDRESS_CITY_PROVINCE}}, and so on. Adding a token to
+ * the template is therefore an extension-side change only; this file never needs to be
+ * re-pasted for it.
+ *
  * Script properties (Project Settings → Script properties), both optional:
  *   refund_letter_template_id  — defaults to TEMPLATE_ID_DEFAULT below
  *   refund_letter_folder_id    — defaults to the template's own parent folder
@@ -22,20 +27,17 @@
 var TEMPLATE_ID_DEFAULT = '1_nlms09jJPr2yD2NArrQU9hMqY3Qy6eEjW9uESP_JGY';
 var LETTER_TIMEZONE = 'America/Toronto';
 
-/** Every token in the template, mapped to the query parameter that fills it. */
-var REFUND_LETTER_TOKENS = {
-  '{{LETTER_DATE}}':           'letterDate',
-  '{{CLIENT_NAME}}':           'clientName',
-  '{{ADDRESS_STREET}}':        'addressStreet',
-  '{{ADDRESS_CITY_PROVINCE}}': 'addressCityProvince',
-  '{{ADDRESS_POSTAL}}':        'addressPostal',
-  '{{CLOSED_CARD_LAST4}}':     'closedCardLast4',
-  '{{NEW_CARD_LAST4}}':        'newCardLast4',
-  '{{REFUND_DATES}}':          'refundDates',
-  '{{DECLINE_REASON}}':        'declineReason',
-  '{{AGENT_FIRST_NAME}}':      'agentFirstName',
-  '{{AGENT_SIGNATURE}}':       'agentSignature'
+/** Query params that control the call rather than filling a token. */
+var REFUND_LETTER_CONTROL_PARAMS = {
+  action: true,
+  wocooTicketId: true,
+  includePdfBase64: true
 };
+
+/** clientName → {{CLIENT_NAME}}, addressCityProvince → {{ADDRESS_CITY_PROVINCE}} */
+function _tokenForParam_(key) {
+  return '{{' + key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase() + '}}';
+}
 
 function _refundLetterTemplateId_() {
   var prop = PropertiesService.getScriptProperties().getProperty('refund_letter_template_id');
@@ -50,19 +52,22 @@ function _refundLetterFolder_(templateFile) {
 }
 
 /**
- * Builds the letter. `params` keys match REFUND_LETTER_TOKENS values.
+ * Builds the letter. Every non-control key in `params` fills its matching {{TOKEN}}.
  * Returns { docId, docUrl, pdfId, pdfUrl, fileName, pdfBase64? }.
  */
 function createRefundLetter(params) {
   params = params || {};
   if (!params.clientName) throw new Error('clientName is required');
 
-  var letterDate = params.letterDate ||
-    Utilities.formatDate(new Date(), LETTER_TIMEZONE, 'EEE MMMM d yyyy');
-  var declineReason = params.declineReason || 'that card was reissued';
-  // The signature line is a script-font rendering of the agent's name; default it to the
-  // typed first name so the letter is never left with a raw token.
-  var agentSignature = params.agentSignature || params.agentFirstName || '';
+  // Defaults so the letter is never left holding a raw token.
+  if (!params.letterDate) {
+    params.letterDate = Utilities.formatDate(new Date(), LETTER_TIMEZONE, 'EEE MMMM d yyyy');
+  }
+  if (!params.declineReason) params.declineReason = 'that card was reissued';
+  if (!params.refundNoun) params.refundNoun = 'refunds';
+  if (!params.refundVerb) params.refundVerb = 'were';
+  // The signature line is a script-font rendering of the agent's name.
+  if (!params.agentSignature) params.agentSignature = params.agentFirstName || '';
 
   var templateFile = DriveApp.getFileById(_refundLetterTemplateId_());
   var folder = _refundLetterFolder_(templateFile);
@@ -70,19 +75,15 @@ function createRefundLetter(params) {
 
   var copy = templateFile.makeCopy(fileName, folder);
   var doc = DocumentApp.openById(copy.getId());
+  var body = doc.getBody();
 
-  var values = {
-    letterDate: letterDate,
-    declineReason: declineReason,
-    agentSignature: agentSignature
-  };
-  for (var token in REFUND_LETTER_TOKENS) {
-    var key = REFUND_LETTER_TOKENS[token];
-    var value = values.hasOwnProperty(key) ? values[key] : params[key];
+  Object.keys(params).forEach(function (key) {
+    if (REFUND_LETTER_CONTROL_PARAMS[key]) return;
+    var value = params[key];
     // replaceText treats its argument as a regex, so escape the braces.
-    var pattern = token.replace(/[{}]/g, '\\$&');
-    doc.getBody().replaceText(pattern, value == null ? '' : String(value));
-  }
+    var pattern = _tokenForParam_(key).replace(/[{}]/g, '\\$&');
+    body.replaceText(pattern, value == null ? '' : String(value));
+  });
   doc.saveAndClose();
 
   // The PDF blob only reflects saved content, hence saveAndClose above.
@@ -107,20 +108,11 @@ function _handleCreateRefundLetterFromGet_(e) {
   var p = (e && e.parameter) || {};
   var payload;
   try {
-    var res = createRefundLetter({
-      clientName: p.clientName,
-      letterDate: p.letterDate,
-      addressStreet: p.addressStreet,
-      addressCityProvince: p.addressCityProvince,
-      addressPostal: p.addressPostal,
-      closedCardLast4: p.closedCardLast4,
-      newCardLast4: p.newCardLast4,
-      refundDates: p.refundDates,
-      declineReason: p.declineReason,
-      agentFirstName: p.agentFirstName,
-      agentSignature: p.agentSignature,
-      includePdfBase64: p.includePdfBase64
-    });
+    // Pass the query string straight through — createRefundLetter maps each key to its
+    // token, so new fields need no change here.
+    var params = {};
+    Object.keys(p).forEach(function (key) { params[key] = p[key]; });
+    var res = createRefundLetter(params);
     payload = { action: 'refundLetterCreated', ok: true, result: res, wocooTicketId: p.wocooTicketId || '' };
   } catch (err) {
     payload = {
@@ -151,8 +143,10 @@ function testCreateRefundLetter() {
     addressPostal: 'M5V 2T6',
     closedCardLast4: '1111',
     newCardLast4: '2222',
-    refundDates: 'July 1 2026 and July 15 2026',
-    declineReason: 'that card was reissued',
+    refundDates: 'July 1 2026',
+    refundNoun: 'refund',
+    refundVerb: 'was',
+    declineReason: 'that card was closed',
     agentFirstName: 'Albert'
   });
   Logger.log(JSON.stringify(res, null, 2));
