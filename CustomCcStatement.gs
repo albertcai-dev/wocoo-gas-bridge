@@ -368,18 +368,28 @@ function _ccRespond_(e, replyAction, fn) {
 }
 
 /**
- * Renders the page that hands `payload` back to the extension. Same shape as
- * RefundLetter.gs's handler.
+ * Hands `payload` back to the extension.
  *
- * window.top, NOT window.parent — parent is GAS's own mae_html_user.js wrapper, which
- * silently drops messages it doesn't recognise, leaving the extension waiting for a
- * reply that never arrives.
+ * Delegates to ReplyTracking.gs's `_repliesReplyHtml_`, which already does everything
+ * that matters here: escapes `<` inside the JSON (statement DETAILS text is client-
+ * supplied, so a merchant name containing `</script` must not be able to break the
+ * page), posts to window.top rather than window.parent — parent is Apps Script's own
+ * mae_html_user.js wrapper, which silently drops messages it doesn't recognise — walks
+ * every intermediate frame, tries window.opener, and closes the tab afterwards.
+ *
+ * The fallback only matters if this module is pasted into a project whose
+ * ReplyTracking.gs predates that helper.
  */
 function _ccPostMessagePage_(payload) {
+  if (typeof _repliesReplyHtml_ === 'function') return _repliesReplyHtml_(payload);
+
+  var json = JSON.stringify(payload).replace(/</g, '\\u003c');
   var html =
-    '<script>window.top.postMessage(' + JSON.stringify(payload) + ', "*");</script>' +
-    '<p>' + (payload.ok ? payload.action : 'Failed: ' + payload.error) + '</p>';
-  return HtmlService.createHtmlOutput(html);
+    '<!DOCTYPE html><html><body><script>' +
+    'var p=' + json + ';' +
+    'try{window.top.postMessage(p,"*");}catch(e){}' +
+    '</script></body></html>';
+  return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
